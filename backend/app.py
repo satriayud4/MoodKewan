@@ -17,7 +17,6 @@ CLASS_NAMES = ['Angry', 'Other', 'Sad', 'Happy']  # Sesuaikan dengan class Anda
 # Load model saat app startup
 try:
     model = tf.saved_model.load(MODEL_PATH)
-    # Untuk inference, kita perlu get the concrete function
     infer = model.signatures["serving_default"]
     print("Model berhasil dimuat!")
 except Exception as e:
@@ -28,18 +27,14 @@ except Exception as e:
 def preprocess_image(image_bytes):
     """Preprocess gambar untuk model"""
     try:
-        # Buka gambar dari bytes dan SELALU convert ke RGB
-        image = Image.open(io.BytesIO(image_bytes))
+        # Buka gambar dari bytes
+        image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
         
-        # Penting: pastikan 3 channel (RGB), jangan grayscale
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-        
-        # Resize ke ukuran yang tepat (224, 224)
-        image = image.resize(IMAGE_SIZE, Image.Resampling.LANCZOS)
+        # Resize ke ukuran yang diinginkan
+        image = image.resize(IMAGE_SIZE)
         
         # Convert ke numpy array dan normalize
-        image_array = np.array(image, dtype=np.float32) / 255.0
+        image_array = np.array(image) / 255.0
         
         # Tambah batch dimension
         image_array = np.expand_dims(image_array, axis=0)
@@ -56,6 +51,7 @@ def predict():
         if model is None:
             return jsonify({'error': 'Model belum dimuat'}), 500
         
+        # Cek apakah file ada di request
         if 'image' not in request.files:
             return jsonify({'error': 'Tidak ada file gambar'}), 400
         
@@ -64,20 +60,22 @@ def predict():
         if file.filename == '':
             return jsonify({'error': 'File tidak dipilih'}), 400
         
+        # Baca file sebagai bytes
         image_bytes = file.read()
+        
+        # Preprocess gambar
         processed_image = preprocess_image(image_bytes)
         
         if processed_image is None:
             return jsonify({'error': 'Gagal memproses gambar'}), 400
         
-        # Predict menggunakan SavedModel format
-        predictions_output = infer(tf.constant(processed_image))
-        predictions = predictions_output['dense_2'].numpy()
-        
+        # Prediksi
+        predictions = model.predict(processed_image)
         predicted_class_idx = np.argmax(predictions[0])
         confidence = float(predictions[0][predicted_class_idx])
         predicted_emotion = CLASS_NAMES[predicted_class_idx]
         
+        # Format respons dengan semua probabilitas
         emotion_scores = {
             CLASS_NAMES[i]: float(predictions[0][i]) 
             for i in range(len(CLASS_NAMES))
@@ -117,4 +115,3 @@ def home():
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
-    
