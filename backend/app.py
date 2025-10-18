@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import tensorflow as tf
+from tensorflow.keras.applications.efficientnet import preprocess_input
 import numpy as np
 from PIL import Image
 import io
@@ -27,14 +28,17 @@ except Exception as e:
 def preprocess_image(image_bytes):
     """Preprocess gambar untuk model"""
     try:
-        # Buka gambar dari bytes
-        image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        # Buka gambar dari bytes dan pastikan RGB
+        image = Image.open(io.BytesIO(image_bytes))
         
-        # Resize ke ukuran yang diinginkan
-        image = image.resize(IMAGE_SIZE)
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Resize ke ukuran yang tepat
+        image = image.resize(IMAGE_SIZE, Image.Resampling.LANCZOS)
         
         # Convert ke numpy array dan normalize
-        image_array = np.array(image) / 255.0
+        image_array = np.array(image, dtype=np.float32) / 255.0
         
         # Tambah batch dimension
         image_array = np.expand_dims(image_array, axis=0)
@@ -69,8 +73,17 @@ def predict():
         if processed_image is None:
             return jsonify({'error': 'Gagal memproses gambar'}), 400
         
-        # Prediksi
-        predictions = model.predict(processed_image)
+        # Prediksi menggunakan SavedModel
+        # Convert numpy array ke tensor
+        input_tensor = tf.convert_to_tensor(processed_image, dtype=tf.float32)
+        predictions_output = infer(input_tensor)
+        
+        # Extract predictions dari output
+        if isinstance(predictions_output, dict):
+            predictions = predictions_output['output_0'].numpy()
+        else:
+            predictions = predictions_output.numpy()
+        
         predicted_class_idx = np.argmax(predictions[0])
         confidence = float(predictions[0][predicted_class_idx])
         predicted_emotion = CLASS_NAMES[predicted_class_idx]
@@ -98,7 +111,7 @@ def health():
     """Endpoint untuk check status backend"""
     return jsonify({
         'status': 'ok',
-        'model_loaded': model is not None,
+        'model_loaded': (model is not None and infer is not None),
         'supported_emotions': CLASS_NAMES
     }), 200
 
