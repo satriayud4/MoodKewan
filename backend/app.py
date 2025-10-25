@@ -11,19 +11,19 @@ app = Flask(__name__)
 CORS(app)
 
 # Konfigurasi model
-MODEL_PATH = 'kewan_emotion_model_export'
+MODEL_PATH = 'facial_expression_model.h5'
 IMAGE_SIZE = (224, 224)
-CLASS_NAMES = ['Angry', 'Other', 'Sad', 'Happy']  # Sesuaikan dengan class Anda
+CLASS_NAMES = ['Angry', 'happy', 'Other', 'Sad']  # Urutan alfabetis dari Kaggle dataset
 
 # Load model saat app startup
 try:
-    model = tf.saved_model.load(MODEL_PATH)
-    infer = model.signatures["serving_default"]
+    model = tf.keras.models.load_model(MODEL_PATH)
     print("Model berhasil dimuat!")
+    print(f"Model input shape: {model.input_shape}")
+    print(f"Model output shape: {model.output_shape}")
 except Exception as e:
     print(f"Error loading model: {e}")
     model = None
-    infer = None
 
 def preprocess_image(image_bytes):
     """Preprocess gambar untuk model"""
@@ -37,11 +37,14 @@ def preprocess_image(image_bytes):
         # Resize ke ukuran yang tepat
         image = image.resize(IMAGE_SIZE, Image.Resampling.LANCZOS)
         
-        # Convert ke numpy array dan normalize
-        image_array = np.array(image, dtype=np.float32) / 255.0
+        # Convert ke numpy array
+        image_array = np.array(image, dtype=np.float32)
         
         # Tambah batch dimension
         image_array = np.expand_dims(image_array, axis=0)
+        
+        # PENTING: Gunakan preprocess_input dari EfficientNet (sama seperti di Colab)
+        image_array = preprocess_input(image_array)
         
         return image_array
     except Exception as e:
@@ -73,16 +76,8 @@ def predict():
         if processed_image is None:
             return jsonify({'error': 'Gagal memproses gambar'}), 400
         
-        # Prediksi menggunakan SavedModel
-        # Convert numpy array ke tensor
-        input_tensor = tf.convert_to_tensor(processed_image, dtype=tf.float32)
-        predictions_output = infer(input_tensor)
-        
-        # Extract predictions dari output
-        if isinstance(predictions_output, dict):
-            predictions = predictions_output['output_0'].numpy()
-        else:
-            predictions = predictions_output.numpy()
+        # Prediksi menggunakan Keras model
+        predictions = model.predict(processed_image, verbose=0)
         
         predicted_class_idx = np.argmax(predictions[0])
         confidence = float(predictions[0][predicted_class_idx])
@@ -111,7 +106,7 @@ def health():
     """Endpoint untuk check status backend"""
     return jsonify({
         'status': 'ok',
-        'model_loaded': (model is not None and infer is not None),
+        'model_loaded': model is not None,
         'supported_emotions': CLASS_NAMES
     }), 200
 
